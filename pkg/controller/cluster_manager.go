@@ -105,8 +105,8 @@ func (c *ClusterManager) shutdown() error {
 // Returns the list of all instance groups corresponding to the given loadbalancers.
 // If in performing the checkpoint the cluster manager runs out of quota, a
 // googleapi 403 is returned.
-func (c *ClusterManager) Checkpoint(lbs []*loadbalancers.L7RuntimeInfo, nodeNames []string, backendServicePorts []backends.ServicePort, namedPorts []backends.ServicePort, endpointPorts []string) ([]*compute.InstanceGroup, error) {
-	glog.V(4).Infof("Checkpoint(%v lbs, %v nodeNames, %v backendServicePorts, %v namedPorts, %v endpointPorts)", len(lbs), len(nodeNames), len(backendServicePorts), len(namedPorts), len(endpointPorts))
+func (c *ClusterManager) Checkpoint(lb *loadbalancers.L7RuntimeInfo, nodeNames []string, backendServicePorts []backends.ServicePort, namedPorts []backends.ServicePort, endpointPorts []string) ([]*compute.InstanceGroup, error) {
+	glog.V(4).Infof("Checkpoint(%v, %v nodeNames, %v backendServicePorts, %v namedPorts, %v endpointPorts)", lb.String(), len(nodeNames), len(backendServicePorts), len(namedPorts), len(endpointPorts))
 
 	if len(namedPorts) != 0 {
 		// Add the default backend node port to the list of named ports for instance groups.
@@ -128,7 +128,7 @@ func (c *ClusterManager) Checkpoint(lbs []*loadbalancers.L7RuntimeInfo, nodeName
 	if err := c.instancePool.Sync(nodeNames); err != nil {
 		return igs, err
 	}
-	if err := c.l7Pool.Sync(lbs); err != nil {
+	if err := c.l7Pool.Sync(lb); err != nil {
 		return igs, err
 	}
 
@@ -215,14 +215,12 @@ func NewClusterManager(
 
 	// BackendPool creates GCE BackendServices and associated health checks.
 	healthChecker := healthchecks.NewHealthChecker(cloud, defaultHealthCheckPath, cluster.ClusterNamer)
-	// Loadbalancer pool manages the default backend and its health check.
+	// TODO(nicksardo): delete this healthchecker
 	defaultBackendHealthChecker := healthchecks.NewHealthChecker(cloud, "/healthz", cluster.ClusterNamer)
 
 	cluster.healthCheckers = []healthchecks.HealthChecker{healthChecker, defaultBackendHealthChecker}
 
-	// TODO: This needs to change to a consolidated management of the default backend.
-	cluster.backendPool = backends.NewBackendPool(cloud, cloud, healthChecker, cluster.instancePool, cluster.ClusterNamer, []int64{defaultBackendNodePort.NodePort}, true)
-	defaultBackendPool := backends.NewBackendPool(cloud, cloud, defaultBackendHealthChecker, cluster.instancePool, cluster.ClusterNamer, []int64{}, false)
+	cluster.backendPool = backends.NewBackendPool(cloud, cloud, healthChecker, cluster.instancePool, cluster.ClusterNamer, []int64{defaultBackendNodePort.Port}, true)
 	cluster.defaultBackendNodePort = defaultBackendNodePort
 
 	// L7 pool creates targetHTTPProxy, ForwardingRules, UrlMaps, StaticIPs.

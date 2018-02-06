@@ -105,6 +105,7 @@ type ServicePort struct {
 	Protocol      annotations.AppProtocol
 	SvcTargetPort string
 	NEGEnabled    bool
+	HealthCheck   healthchecks.HealthCheck
 }
 
 // Description returns a string describing the ServicePort.

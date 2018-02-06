@@ -290,15 +290,15 @@ func (lbc *LoadBalancerController) sync(key string) (err error) {
 		glog.V(3).Infof("Finished syncing %v", key)
 	}()
 
-	singleIngressList := &extensions.IngressList{
-		Items: []extensions.Ingress{*ing},
-	}
-	lbs, err := lbc.toRuntimeInfo(singleIngressList)
+	lbs, err := lbc.toRuntimeInfo(ing)
 	if err != nil {
 		return err
 	}
 
 	// Get all service ports for the ingress being synced.
+	singleIngressList := &extensions.IngressList{
+		Items: []extensions.Ingress{*ing},
+	}
 	ingSvcPorts := lbc.Translator.ToNodePorts(singleIngressList)
 
 	igs, err := lbc.CloudClusterManager.Checkpoint(lbs, nodeNames, ingSvcPorts, allNodePorts, lbc.Translator.GatherEndpointPorts(gceNodePorts))
@@ -395,36 +395,32 @@ func (lbc *LoadBalancerController) updateIngressStatus(l7 *loadbalancers.L7, ing
 	return nil
 }
 
-// toRuntimeInfo returns L7RuntimeInfo for the given ingresses.
-func (lbc *LoadBalancerController) toRuntimeInfo(ingList *extensions.IngressList) (lbs []*loadbalancers.L7RuntimeInfo, err error) {
-	for _, ing := range ingList.Items {
-		k, err := keyFunc(&ing)
-		if err != nil {
-			glog.Warningf("Cannot get key for Ingress %v/%v: %v", ing.Namespace, ing.Name, err)
-			continue
-		}
-
-		var tls *loadbalancers.TLSCerts
-
-		annotations := annotations.FromIngress(&ing)
-		// Load the TLS cert from the API Spec if it is not specified in the annotation.
-		// TODO: enforce this with validation.
-		if annotations.UseNamedTLS() == "" {
-			tls, err = lbc.tlsLoader.Load(&ing)
-			if err != nil {
-				glog.Warningf("Cannot get certs for Ingress %v/%v: %v", ing.Namespace, ing.Name, err)
-			}
-		}
-
-		lbs = append(lbs, &loadbalancers.L7RuntimeInfo{
-			Name:         k,
-			TLS:          tls,
-			TLSName:      annotations.UseNamedTLS(),
-			AllowHTTP:    annotations.AllowHTTP(),
-			StaticIPName: annotations.StaticIPName(),
-		})
+// toRuntimeInfo returns L7RuntimeInfo for the given ingress.
+func (lbc *LoadBalancerController) toRuntimeInfo(ing *extensions.Ingress) (*loadbalancers.L7RuntimeInfo, error) {
+	k, err := keyFunc(&ing)
+	if err != nil {
+		glog.Warningf("Cannot get key for Ingress %v/%v: %v", ing.Namespace, ing.Name, err)
+		continue
 	}
-	return lbs, nil
+
+	var tls *loadbalancers.TLSCerts
+	annotations := annotations.FromIngress(&ing)
+	// Load the TLS cert from the API Spec if it is not specified in the annotation.
+	// TODO: enforce this with validation.
+	if annotations.UseNamedTLS() == "" {
+		tls, err = lbc.tlsLoader.Load(&ing)
+		if err != nil {
+			glog.Warningf("Cannot get certs for Ingress %v/%v: %v", ing.Namespace, ing.Name, err)
+		}
+	}
+
+	return &loadbalancers.L7RuntimeInfo{
+		Name:         k,
+		TLS:          tls,
+		TLSName:      annotations.UseNamedTLS(),
+		AllowHTTP:    annotations.AllowHTTP(),
+		StaticIPName: annotations.StaticIPName(),
+	}
 }
 
 func updateAnnotations(client kubernetes.Interface, name, namespace string, annotations map[string]string) error {

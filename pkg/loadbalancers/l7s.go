@@ -34,17 +34,7 @@ import (
 type L7s struct {
 	cloud       LoadBalancers
 	snapshotter storage.Snapshotter
-	// TODO: Remove this field and always ask the BackendPool using the NodePort.
-	glbcDefaultBackend     *compute.BackendService
-	defaultBackendPool     backends.BackendPool
-	defaultBackendNodePort backends.ServicePort
 	namer                  *utils.Namer
-}
-
-// GLBCDefaultBackend returns the BackendService used when no path
-// rules match.
-func (l *L7s) GLBCDefaultBackend() *compute.BackendService {
-	return l.glbcDefaultBackend
 }
 
 // Namer returns the namer associated with the L7s.
@@ -55,26 +45,20 @@ func (l *L7s) Namer() *utils.Namer {
 // NewLoadBalancerPool returns a new loadbalancer pool.
 // - cloud: implements LoadBalancers. Used to sync L7 loadbalancer resources
 //	 with the cloud.
-// - defaultBackendPool: a BackendPool used to manage the GCE BackendService for
-//   the default backend.
-// - defaultBackendNodePort: The nodePort of the Kubernetes service representing
-//   the default backend.
-func NewLoadBalancerPool(
-	cloud LoadBalancers,
-	defaultBackendPool backends.BackendPool,
-	defaultBackendNodePort backends.ServicePort, namer *utils.Namer) LoadBalancerPool {
-	return &L7s{cloud, storage.NewInMemoryPool(), nil, defaultBackendPool, defaultBackendNodePort, namer}
+func NewLoadBalancerPool(cloud LoadBalancers, namer *utils.Namer) LoadBalancerPool {
+	return &L7s{
+		cloud: cloud,
+		snapshotter: storage.NewInMemoryPool(),
+		namer: namer
+	}
 }
 
 func (l *L7s) create(ri *L7RuntimeInfo) (*L7, error) {
-	if l.glbcDefaultBackend == nil {
-		glog.Warningf("Creating l7 without a default backend")
-	}
 	return &L7{
 		runtimeInfo:        ri,
 		Name:               l.namer.LoadBalancer(ri.Name),
 		cloud:              l.cloud,
-		glbcDefaultBackend: l.glbcDefaultBackend,
+	//	glbcDefaultBackend: l.glbcDefaultBackend,
 		namer:              l.namer,
 		sslCert:            nil,
 	}, nil
@@ -92,7 +76,7 @@ func (l *L7s) Get(name string) (*L7, error) {
 
 // Add gets or creates a loadbalancer.
 // If the loadbalancer already exists, it checks that its edges are valid.
-func (l *L7s) Add(ri *L7RuntimeInfo) (err error) {
+func (l *L7s) Sync(ri *L7RuntimeInfo) (err error) {
 	name := l.namer.LoadBalancer(ri.Name)
 
 	lb, _ := l.Get(name)
@@ -139,6 +123,7 @@ func (l *L7s) Delete(name string) error {
 	return nil
 }
 
+<<<<<<< Updated upstream
 // Sync loadbalancers with the given runtime info from the controller.
 func (l *L7s) Sync(lbs []*L7RuntimeInfo) error {
 	glog.V(3).Infof("Syncing loadbalancers %v", lbs)
@@ -184,15 +169,6 @@ func (l *L7s) GC(names []string) error {
 		if err := l.Delete(name); err != nil {
 			return err
 		}
-	}
-	// Tear down the default backend when there are no more loadbalancers.
-	// This needs to happen after we've deleted all url-maps that might be
-	// using it.
-	if len(names) == 0 {
-		if err := l.defaultBackendPool.Delete(l.defaultBackendNodePort.NodePort); err != nil {
-			return err
-		}
-		l.glbcDefaultBackend = nil
 	}
 	return nil
 }
