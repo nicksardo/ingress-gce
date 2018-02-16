@@ -33,6 +33,7 @@ type BackendPool interface {
 	Init(p ProbeProvider)
 	Ensure(ports []ServicePort, igs []*compute.InstanceGroup) error
 	Get(port int64) (*compute.BackendService, error)
+	GetSnapshot(port int64) (*compute.BackendService, error)
 	Delete(port int64) error
 	GC(ports []ServicePort) error
 	Shutdown() error

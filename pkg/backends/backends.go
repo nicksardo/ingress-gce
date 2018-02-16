@@ -177,6 +177,19 @@ func (b *Backends) Get(port int64) (*compute.BackendService, error) {
 	return be, nil
 }
 
+// GetSnapshot returns the backend stored in the snapshot
+func (b *Backends) GetSnapshot(port int64) (*compute.BackendService, error) {
+	o, exists := b.snapshotter.Get(portKey(port))
+	if !exists {
+		return nil, fmt.Errorf("backend service %q snapshot not found", portKey(port))
+	}
+	v, ok := o.(*compute.BackendService)
+	if !ok {
+		return nil, fmt.Errorf("snapshot object %q is not a backend service", portKey(port))
+	}
+	return v, nil
+}
+
 func (b *Backends) ensureHealthCheck(sp ServicePort) (string, error) {
 	hc := b.healthChecker.New(sp.NodePort, sp.Protocol, sp.NEGEnabled)
 	existingLegacyHC, err := b.healthChecker.GetLegacy(sp.NodePort)
