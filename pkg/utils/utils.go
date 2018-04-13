@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"google.golang.org/api/googleapi"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
 )
 
 const (
@@ -90,10 +91,44 @@ func IsForbiddenError(err error) bool {
 	return IsHTTPErrorCode(err, http.StatusForbidden)
 }
 
-// CompareLinks returns true if the 2 self links are equal.
+// CompareLinks returns true if the 2 self links are equal in their entirety
+// or as relative resource names (ignoring API endpoint and version).
 func CompareLinks(l1, l2 string) bool {
-	// TODO: These can be partial links
-	return l1 == l2 && l1 != ""
+	if l1 == l2 && l1 != "" {
+		return true
+	}
+
+	id1, err := cloud.ParseResourceURL(l1)
+	if err != nil {
+		return false
+	}
+
+	id2, err := cloud.ParseResourceURL(l2)
+	if err != nil {
+		return false
+	}
+
+	return id1.Equal(id2)
+}
+
+func CompareLinksWithoutProject(l1, l2 string) bool {
+	if l1 == l2 && l1 != "" {
+		return true
+	}
+
+	id1, err := cloud.ParseResourceURL(l1)
+	if err != nil {
+		return false
+	}
+	id1.ProjectID = ""
+
+	id2, err := cloud.ParseResourceURL(l2)
+	if err != nil {
+		return false
+	}
+	id2.ProjectID = ""
+
+	return id1.Equal(id2)
 }
 
 // FakeIngressRuleValueMap is a convenience type used by multiple submodules
@@ -141,15 +176,4 @@ func trimFieldsEvenly(max int, fields ...string) []string {
 // BackendService given its name.
 func BackendServiceRelativeResourcePath(name string) string {
 	return fmt.Sprintf("global/backendServices/%v", name)
-}
-
-// BackendServiceComparablePath trims project and compute version from the SelfLink
-// for a global BackendService.
-// global/backendServices/[BACKEND_SERVICE_NAME]
-func BackendServiceComparablePath(url string) string {
-	path_parts := strings.Split(url, "global/")
-	if len(path_parts) != 2 {
-		return ""
-	}
-	return fmt.Sprintf("global/%s", path_parts[1])
 }

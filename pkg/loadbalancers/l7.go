@@ -772,7 +772,7 @@ func (l *L7) UpdateUrlMap(ingressRules utils.GCEURLMap) error {
 }
 
 func mapsEqual(a, b *compute.UrlMap) bool {
-	if utils.BackendServiceComparablePath(a.DefaultService) != utils.BackendServiceComparablePath(b.DefaultService) {
+	if utils.CompareLinksWithoutProject(a.DefaultService, b.DefaultService) {
 		return false
 	}
 	if len(a.HostRules) != len(b.HostRules) {
@@ -802,7 +802,7 @@ func mapsEqual(a, b *compute.UrlMap) bool {
 	for i := range a.PathMatchers {
 		a := a.PathMatchers[i]
 		b := b.PathMatchers[i]
-		if utils.BackendServiceComparablePath(a.DefaultService) != utils.BackendServiceComparablePath(b.DefaultService) {
+		if utils.CompareLinksWithoutProject(a.DefaultService, b.DefaultService) {
 			return false
 		}
 		if a.Description != b.Description {
@@ -827,7 +827,7 @@ func mapsEqual(a, b *compute.UrlMap) bool {
 			}
 			// Trim down the url's for a.Service and b.Service to a comparable structure
 			// We do this because we update the UrlMap with relative links (not full) to backends.
-			if utils.BackendServiceComparablePath(a.Service) != utils.BackendServiceComparablePath(b.Service) {
+			if utils.CompareLinksWithoutProject(a.Service, b.Service) {
 				return false
 			}
 		}
