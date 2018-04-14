@@ -32,10 +32,11 @@ import (
 type Controller struct {
 	resyncPeriod time.Duration
 
+	targetClusters map[string]*targetCluster
+
 	clusterSynced cache.InformerSynced
 	clusterLister cache.Indexer
-
-	// TODO(rramkumar): Add lister for service extension CRD.
+	// TODO: Add service extension CRD support.
 }
 
 func NewController(ctx *context.ControllerContext, resyncPeriod time.Duration) (*Controller, error) {
@@ -47,7 +48,16 @@ func NewController(ctx *context.ControllerContext, resyncPeriod time.Duration) (
 
 	ctx.MC.ClusterInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			c := obj.(*crv1alpha1.Cluster)
+			c, ok := obj.(*crv1alpha1.Cluster)
+			if !ok {
+				glog.Errorf("Expected clusterregistry.Cluster, got %#v ", obj )
+			}
+
+			tc := newTargetCluster(c)
+			if tc.init(); err != nil {
+				glog.Errorf("Failed to initiate ")
+			}
+
 			glog.V(3).Infof("Cluster %v added", c.Name)
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -74,3 +84,5 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 func (c *Controller) synced() bool {
 	return c.clusterSynced()
 }
+
+func
