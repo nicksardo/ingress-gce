@@ -204,6 +204,6 @@ func (l *L7s) Shutdown() error {
 	if err := l.defaultBackendPool.Shutdown(); err != nil {
 		return err
 	}
-	glog.Infof("Loadbalancer pool shutdown.")
+	glog.V(2).Infof("Loadbalancer pool shutdown.")
 	return nil
 }

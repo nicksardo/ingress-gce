@@ -755,11 +755,11 @@ func (l *L7) UpdateUrlMap(ingressRules utils.GCEURLMap) error {
 	}
 	oldMap, _ := l.cloud.GetUrlMap(l.um.Name)
 	if oldMap != nil && mapsEqual(oldMap, l.um) {
-		glog.Infof("UrlMap for l7 %v is unchanged", l.Name)
+		glog.V(4).Infof("URLMap for l7 %v is unchanged", l.Name)
 		return nil
 	}
 
-	glog.V(3).Infof("Updating URLMap: %q", l.Name)
+	glog.V(3).Infof("Updating URLMap: %q", l.um.Name)
 	if err := l.cloud.UpdateUrlMap(l.um); err != nil {
 		return err
 	}
