@@ -383,7 +383,10 @@ func (b *Backends) ensureBackendService(sp utils.ServicePort, igLinks []string) 
 // edgeHop checks the links of the given backend by executing an edge hop.
 // It fixes broken links and updates the Backend accordingly.
 func (b *Backends) edgeHop(be *BackendService, igLinks []string) error {
-	addIGs := getInstanceGroupsToAdd(be, igLinks)
+	addIGs, err := getInstanceGroupsToAdd(be, igLinks)
+	if err != nil {
+		return err
+	}
 	if len(addIGs) == 0 {
 		return nil
 	}
@@ -543,34 +546,34 @@ func getBackendsForNEGs(negs []*computealpha.NetworkEndpointGroup) []*computealp
 	return backends
 }
 
-func getInstanceGroupsToAdd(be *BackendService, igLinks []string) []string {
+func getInstanceGroupsToAdd(be *BackendService, igLinks []string) ([]string, error) {
 	// A GA link can be used to reference an alpha object - so we only need to
 	// check the GA InstanceGroups.
-	beName := be.Ga.Name
-	beIGs := sets.String{}
+	gotIGs := sets.String{}
 	for _, existingBe := range be.Ga.Backends {
-		beIGs.Insert(comparableGroupPath(existingBe.Group))
-	}
-
-	expectedIGs := sets.String{}
-	for _, igLink := range igLinks {
-		expectedIGs.Insert(comparableGroupPath(igLink))
-	}
-
-	if beIGs.IsSuperset(expectedIGs) {
-		return nil
-	}
-	glog.V(2).Infof("Expected igs for backend service %v: %+v, current igs %+v",
-		beName, expectedIGs.List(), beIGs.List())
-
-	var addIGs []string
-	for _, igLink := range igLinks {
-		if !beIGs.Has(comparableGroupPath(igLink)) {
-			addIGs = append(addIGs, igLink)
+		path, err := utils.ResourcePath(existingBe.Group)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get resource path: %v", err)
 		}
+		gotIGs.Insert(path)
 	}
 
-	return addIGs
+	wantIGs := sets.String{}
+	for _, igLink := range igLinks {
+		path, err := utils.ResourcePath(igLink)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get resource path: %v", err)
+		}
+		wantIGs.Insert(path)
+	}
+
+	missingIGs := wantIGs.Difference(gotIGs)
+	if missingIGs.Len() > 0 {
+		glog.V(2).Infof("Backend service %q has instance groups %+v, want %+v",
+			be.Ga.Name, gotIGs.List(), wantIGs.List())
+	}
+
+	return missingIGs.List(), nil
 }
 
 // GC garbage collects services corresponding to ports in the given list.
@@ -703,11 +706,4 @@ func applyProbeSettingsToHC(p *v1.Probe, hc *healthchecks.HealthCheck) {
 func retrieveObjectName(url string) string {
 	splited := strings.Split(url, "/")
 	return splited[len(splited)-1]
-}
-
-// comparableGroupPath trims project and compute version from the SelfLink
-// /zones/[ZONE_NAME]/instanceGroups/[IG_NAME]
-func comparableGroupPath(url string) string {
-	path_parts := strings.Split(url, "/zones/")
-	return fmt.Sprintf("/zones/%s", path_parts[1])
 }

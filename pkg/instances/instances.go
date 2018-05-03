@@ -19,7 +19,6 @@ package instances
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/golang/glog"
 
@@ -181,15 +180,16 @@ func (i *Instances) list(name string) (sets.String, error) {
 	}
 
 	for _, zone := range zones {
-		instances, err := i.cloud.ListInstancesInInstanceGroup(name, zone, allInstances)
+		refs, err := i.cloud.ListInstancesInInstanceGroup(name, zone, allInstances)
 		if err != nil {
 			return nodeNames, err
 		}
-		for _, ins := range instances {
-			// TODO: If round trips weren't so slow one would be inclided
-			// to GetInstance using this url and get the name.
-			parts := strings.Split(ins.Instance, "/")
-			nodeNames.Insert(parts[len(parts)-1])
+		for _, instanceRef := range refs {
+			name, err := utils.ResourceName(instanceRef.Instance)
+			if err != nil {
+				return nodeNames, err
+			}
+			nodeNames.Insert(name)
 		}
 	}
 	return nodeNames, nil

@@ -26,6 +26,7 @@ import (
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
 )
 
 const (
@@ -166,21 +167,51 @@ func PrettyJson(data interface{}) (string, error) {
 	return buffer.String(), nil
 }
 
-// BackendServiceRelativeResourcePath returns a relative path of the link for a
-// BackendService given its name.
-func BackendServiceRelativeResourcePath(name string) string {
-	return fmt.Sprintf("global/backendServices/%v", name)
+// ResourceName returns the name portion from a full or partial GCP resource URL.
+// Example:
+//    https://googleapis.com/v1/compute/projects/my-project/global/backendServices/my-backend
+// Output: my-backend
+func ResourceName(url string) (string, error) {
+	id, err := cloud.ParseResourceURL(url)
+	if err != nil {
+		return "", err
+	}
+
+	if id.Key == nil {
+		// Resource is projects
+		return id.ProjectID, nil
+	}
+
+	return id.Key.Name, nil
 }
 
-// BackendServiceComparablePath trims project and compute version from the SelfLink
-// for a global BackendService.
-// global/backendServices/[BACKEND_SERVICE_NAME]
-func BackendServiceComparablePath(url string) string {
-	path_parts := strings.Split(url, "global/")
-	if len(path_parts) != 2 {
-		return ""
+// ResourcePath returns the location, resource and name portion from a
+// full or partial GCP resource URL. This removes the endpoint prefix, version, and project.
+// Example:
+//    https://googleapis.com/v1/compute/projects/my-project/global/backendServices/my-backend
+// Output: global/backendServices/my-backend
+func ResourcePath(url string) (string, error) {
+	resID, err := cloud.ParseResourceURL(url)
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("global/%s", path_parts[1])
+	return resID.ResourcePath(), nil
+}
+
+// EqualResourcePaths returns true if a and b have equal ResourcePaths. Resource paths
+// entail the location, resource type, and resource name.
+func EqualResourcePaths(a, b string) bool {
+	aPath, err := ResourcePath(a)
+	if err != nil {
+		return false
+	}
+
+	bPath, err := ResourcePath(b)
+	if err != nil {
+		return false
+	}
+
+	return aPath == bPath
 }
 
 // IGLinks returns a list of links extracted from the passed in list of

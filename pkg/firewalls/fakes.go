@@ -23,6 +23,8 @@ import (
 	compute "google.golang.org/api/compute/v1"
 
 	"k8s.io/ingress-gce/pkg/utils"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud/meta"
 )
 
 type fakeFirewallsProvider struct {
@@ -60,6 +62,7 @@ func (ff *fakeFirewallsProvider) doCreateFirewall(f *compute.Firewall) error {
 	if err != nil {
 		return err
 	}
+	cf.SelfLink = cloud.NewFirewallsResourceID("mock-project", f.Name).SelfLink(meta.VersionGA)
 	ff.fw[f.Name] = cf
 	return nil
 }

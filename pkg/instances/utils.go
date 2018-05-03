@@ -11,3 +11,15 @@ import (
 func EnsureInstanceGroupsAndPorts(nodePool NodePool, namer *utils.Namer, ports []int64) ([]*compute.InstanceGroup, error) {
 	return nodePool.EnsureInstanceGroupsAndPorts(namer.InstanceGroup(), ports)
 }
+
+func instanceNamesFromRefs(refs []*compute.InstanceReference) ([]string, error) {
+	var names []string
+	for _, r := range refs {
+		name, err := utils.ResourceName(r.Instance)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}

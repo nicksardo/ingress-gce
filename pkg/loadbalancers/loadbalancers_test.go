@@ -546,17 +546,20 @@ func verifyProxyCertsInOrder(hostname string, f *FakeLoadBalancers, t *testing.T
 		t.Fatalf("expected https proxy to exist: %v, err: %v", f.TPName(true), err)
 	}
 	count := 0
-	tmp := ""
 
-	for _, linkName := range tps.SslCertificates {
-		cert, err := f.GetSslCertificate(getResourceNameFromLink(linkName))
+	for _, certURL := range tps.SslCertificates {
+		certName, err := utils.ResourceName(certURL)
 		if err != nil {
-			t.Fatalf("Failed to fetch certificate from link %s - %v", linkName, err)
+			t.Fatalf("Failed to parse URL %q for name, err %v", certURL, err)
+		}
+		cert, err := f.GetSslCertificate(certName)
+		if err != nil {
+			t.Fatalf("Failed to fetch certificate %q - %v", certName, err)
 		}
 		if strings.HasSuffix(cert.Certificate, hostname) {
 			// cert contents will be of the form "cert-<number> <hostname>", we want the certs with the smaller number
 			// to show up first
-			tmp = strings.TrimSuffix(cert.Certificate, hostname)
+			tmp := strings.TrimSuffix(cert.Certificate, hostname)
 			if int(tmp[len(tmp)-1]-'0') != count {
 				t.Fatalf("Found cert with index %c, contents - %s, Expected index %d", tmp[len(tmp)-1],
 					cert.Certificate, count)
@@ -602,8 +605,12 @@ func verifyCertAndProxyLink(expectCerts map[string]string, expectCertsProxy map[
 	if len(tps.SslCertificates) != len(expectCertsProxy) {
 		t.Fatalf("Expected https proxy to have %d certs, actual %d", len(expectCertsProxy), len(tps.SslCertificates))
 	}
-	for _, linkName := range tps.SslCertificates {
-		if _, ok := expectCerts[getResourceNameFromLink(linkName)]; !ok {
+	for _, certURL := range tps.SslCertificates {
+		certName, err := utils.ResourceName(certURL)
+		if err != nil {
+			t.Fatalf("Failed to parse URL %q for name, err %v", certURL, err)
+		}
+		if _, ok := expectCerts[certName]; !ok {
 			t.Fatalf("unexpected ssl certificate linked in target proxy; Expected : %v; Target Proxy Certs: %v",
 				expectCertsProxy, tps.SslCertificates)
 		}

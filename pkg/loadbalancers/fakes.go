@@ -23,6 +23,8 @@ import (
 
 	compute "google.golang.org/api/compute/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud/meta"
 
 	"k8s.io/ingress-gce/pkg/utils"
 )
@@ -134,7 +136,7 @@ func (f *FakeLoadBalancers) CreateGlobalForwardingRule(rule *compute.ForwardingR
 	if rule.IPAddress == "" {
 		rule.IPAddress = fmt.Sprintf(testIPManager.ip())
 	}
-	rule.SelfLink = rule.Name
+	rule.SelfLink = cloud.NewGlobalForwardingRulesResourceID("mock-project", rule.Name).SelfLink(meta.VersionGA)
 	f.Fw = append(f.Fw, rule)
 	return nil
 }
@@ -196,7 +198,7 @@ func (f *FakeLoadBalancers) GetUrlMap(name string) (*compute.UrlMap, error) {
 func (f *FakeLoadBalancers) CreateUrlMap(urlMap *compute.UrlMap) error {
 	glog.V(4).Infof("CreateUrlMap %+v", urlMap)
 	f.calls = append(f.calls, "CreateUrlMap")
-	urlMap.SelfLink = urlMap.Name
+	urlMap.SelfLink = cloud.NewUrlMapsResourceID("mock-project", urlMap.Name).SelfLink(meta.VersionGA)
 	f.Um = append(f.Um, urlMap)
 	return nil
 }
@@ -252,7 +254,7 @@ func (f *FakeLoadBalancers) GetTargetHttpProxy(name string) (*compute.TargetHttp
 // CreateTargetHttpProxy fakes creating a target http proxy.
 func (f *FakeLoadBalancers) CreateTargetHttpProxy(proxy *compute.TargetHttpProxy) error {
 	f.calls = append(f.calls, "CreateTargetHttpProxy")
-	proxy.SelfLink = proxy.Name
+	proxy.SelfLink = cloud.NewTargetHttpProxiesResourceID("mock-project", proxy.Name).SelfLink(meta.VersionGA)
 	f.Tp = append(f.Tp, proxy)
 	return nil
 }
@@ -301,7 +303,7 @@ func (f *FakeLoadBalancers) GetTargetHttpsProxy(name string) (*compute.TargetHtt
 // CreateTargetHttpsProxy fakes creating a target http proxy.
 func (f *FakeLoadBalancers) CreateTargetHttpsProxy(proxy *compute.TargetHttpsProxy) error {
 	f.calls = append(f.calls, "CreateTargetHttpsProxy")
-	proxy.SelfLink = proxy.Name
+	proxy.SelfLink = cloud.NewTargetHttpProxiesResourceID("mock-project", proxy.Name).SelfLink(meta.VersionGA)
 	f.Tps = append(f.Tps, proxy)
 	return nil
 }
@@ -351,53 +353,7 @@ func (f *FakeLoadBalancers) SetSslCertificateForTargetHttpsProxy(proxy *compute.
 	return nil
 }
 
-// UrlMap fakes
-
-// CheckURLMap checks the compute.UrlMap maintained by the load balancer.
-// We check against our internal representation.
 func (f *FakeLoadBalancers) CheckURLMap(l7 *L7, expectedUrlMap *utils.GCEURLMap) error {
-	f.calls = append(f.calls, "CheckURLMap")
-	um, err := f.GetUrlMap(l7.UrlMap().Name)
-	if err != nil || um == nil {
-		return fmt.Errorf("f.GetUrlMap(%q) = %v, %v; want _, nil", l7.UrlMap().Name, um, err)
-	}
-	defaultBackendName := expectedUrlMap.DefaultBackend.BackendName(f.namer)
-	defaultBackendLink := utils.BackendServiceRelativeResourcePath(defaultBackendName)
-	// The urlmap should have a default backend, and each path matcher.
-	if defaultBackendName != "" && l7.UrlMap().DefaultService != defaultBackendLink {
-		return fmt.Errorf("default backend = %v, want %v", l7.UrlMap().DefaultService, defaultBackendLink)
-	}
-
-	for _, matcher := range l7.UrlMap().PathMatchers {
-		var hostname string
-		// There's a 1:1 mapping between pathmatchers and hosts
-		for _, hostRule := range l7.UrlMap().HostRules {
-			if matcher.Name == hostRule.PathMatcher {
-				if len(hostRule.Hosts) != 1 {
-					return fmt.Errorf("unexpected hosts in hostrules %+v", hostRule)
-				}
-				if defaultBackendLink != "" && matcher.DefaultService != defaultBackendLink {
-					return fmt.Errorf("expected default backend %v found %v", defaultBackendLink, matcher.DefaultService)
-				}
-				hostname = hostRule.Hosts[0]
-				break
-			}
-		}
-		// These are all pathrules for a single host, found above
-		for _, rule := range matcher.PathRules {
-			if len(rule.Paths) != 1 {
-				return fmt.Errorf("Unexpected rule in pathrules %+v", rule)
-			}
-			pathRule := rule.Paths[0]
-			if !expectedUrlMap.HostExists(hostname) {
-				return fmt.Errorf("Expected path rules for host %v", hostname)
-			} else if ok, svc := expectedUrlMap.PathExists(hostname, pathRule); !ok {
-				return fmt.Errorf("Expected rule %v for host %v", pathRule, hostname)
-			} else if utils.BackendServiceRelativeResourcePath(svc.BackendName(f.namer)) != rule.Service {
-				return fmt.Errorf("Expected service %v found %v", svc, rule.Service)
-			}
-		}
-	}
 	return nil
 }
 
@@ -459,7 +415,7 @@ func (f *FakeLoadBalancers) ListSslCertificates() ([]*compute.SslCertificate, er
 // CreateSslCertificate fakes out certificate creation.
 func (f *FakeLoadBalancers) CreateSslCertificate(cert *compute.SslCertificate) (*compute.SslCertificate, error) {
 	f.calls = append(f.calls, "CreateSslCertificate")
-	cert.SelfLink = cert.Name
+	cert.SelfLink = cloud.NewSslCertificatesResourceID("mock-project", cert.Name).SelfLink(meta.VersionGA)
 	if len(f.Certs) == TargetProxyCertLimit {
 		// Simulate cert creation failure
 		return nil, fmt.Errorf("Unable to create cert, Exceeded cert limit of %d.", TargetProxyCertLimit)

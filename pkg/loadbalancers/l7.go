@@ -28,6 +28,7 @@ import (
 
 	compute "google.golang.org/api/compute/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
 
 	"crypto/sha256"
 
@@ -150,7 +151,7 @@ func (l *L7) assertUrlMapExists() (err error) {
 	glog.V(3).Infof("Creating url map %v for backend %v", urlMapName, defaultBackendName)
 	newUrlMap := &compute.UrlMap{
 		Name:           urlMapName,
-		DefaultService: utils.BackendServiceRelativeResourcePath(defaultBackendName),
+		DefaultService: backendServiceResourcePath(defaultBackendName),
 	}
 	if err = l.cloud.CreateUrlMap(newUrlMap); err != nil {
 		return err
@@ -215,15 +216,6 @@ func (l *L7) deleteOldSSLCerts() {
 			glog.Errorf("Old cert delete failed - %v", certErr)
 		}
 	}
-}
-
-// Returns the name portion of a link - which is the last section
-func getResourceNameFromLink(link string) string {
-	s := strings.Split(link, "/")
-	if len(s) == 0 {
-		return ""
-	}
-	return s[len(s)-1]
 }
 
 func (l *L7) usePreSharedCert() (bool, error) {
@@ -296,11 +288,15 @@ func (l *L7) populateSSLCert() error {
 		expectedCertNames := l.getSslCertLinkInUse()
 		for _, link := range expectedCertNames {
 			// Retrieve the certificate and ignore error if certificate wasn't found
-			name := getResourceNameFromLink(link)
+			name, err := utils.ResourceName(link)
+			if err != nil {
+				glog.Warningf("Could not get resource name from %q, skipping", link)
+				continue
+			}
 			if !l.namer.IsLegacySSLCert(l.Name, name) {
 				continue
 			}
-			cert, _ := l.cloud.GetSslCertificate(getResourceNameFromLink(name))
+			cert, _ := l.cloud.GetSslCertificate(name)
 			if cert != nil {
 				glog.V(4).Infof("Populating legacy ssl cert %s for l7 %s", cert.Name, l.Name)
 				l.sslCerts = append(l.sslCerts, cert)
@@ -451,14 +447,14 @@ func (l *L7) compareCerts(certLinks []string) bool {
 		glog.V(4).Infof("Loadbalancer has %d certs, target proxy has %d certs", len(certsMap), len(certLinks))
 		return false
 	}
-	var certName string
-	for _, linkName := range certLinks {
-		certName = getResourceNameFromLink(linkName)
-		if cert, ok := certsMap[certName]; !ok {
-			glog.V(4).Infof("Cannot find cert with name %s in certsMap %+v", certName, certsMap)
+	for _, certURL := range certLinks {
+		certName, err := utils.ResourceName(certURL)
+		if err != nil {
+			glog.Warningf("Cannot parse resource name from URL %q, err %v", certURL, err)
 			return false
-		} else if ok && !utils.CompareLinks(linkName, cert.SelfLink) {
-			glog.V(4).Infof("Selflink compare failed for certs - %s in loadbalancer, %s in targetproxy", cert.SelfLink, linkName)
+		}
+		if _, ok := certsMap[certName]; !ok {
+			glog.V(4).Infof("Cannot find cert with name %q in certsMap %+v", certName, certsMap)
 			return false
 		}
 	}
@@ -476,8 +472,7 @@ func (l *L7) checkForwardingRule(name, proxyLink, ip, portRange string) (fw *com
 		fw = nil
 	}
 	if fw == nil {
-		parts := strings.Split(proxyLink, "/")
-		glog.V(3).Infof("Creating forwarding rule for proxy %v and ip %v:%v", parts[len(parts)-1:], ip, portRange)
+		glog.V(3).Infof("Creating forwarding rule for proxy %q and ip %v:%v", proxyLink, ip, portRange)
 		rule := &compute.ForwardingRule{
 			Name:       name,
 			IPAddress:  ip,
@@ -723,7 +718,7 @@ func (l *L7) UpdateUrlMap() error {
 
 	urlMap := l.runtimeInfo.UrlMap
 	defaultBackendName := urlMap.DefaultBackend.BackendName(l.namer)
-	l.um.DefaultService = utils.BackendServiceRelativeResourcePath(defaultBackendName)
+	l.um.DefaultService = backendServiceResourcePath(defaultBackendName)
 
 	// Every update replaces the entire urlmap.
 	// TODO:  when we have multiple loadbalancers point to a single gce url map
@@ -752,7 +747,7 @@ func (l *L7) UpdateUrlMap() error {
 		// GCE ensures that matched rule with longest prefix wins.
 		for _, rule := range rules {
 			beName := rule.Backend.BackendName(l.namer)
-			beLink := utils.BackendServiceRelativeResourcePath(beName)
+			beLink := backendServiceResourcePath(beName)
 			pathMatcher.PathRules = append(
 				pathMatcher.PathRules, &compute.PathRule{Paths: []string{rule.Path}, Service: beLink})
 		}
@@ -779,7 +774,7 @@ func (l *L7) UpdateUrlMap() error {
 }
 
 func mapsEqual(a, b *compute.UrlMap) bool {
-	if utils.BackendServiceComparablePath(a.DefaultService) != utils.BackendServiceComparablePath(b.DefaultService) {
+	if !utils.EqualResourcePaths(a.DefaultService, b.DefaultService) {
 		return false
 	}
 	if len(a.HostRules) != len(b.HostRules) {
@@ -809,7 +804,7 @@ func mapsEqual(a, b *compute.UrlMap) bool {
 	for i := range a.PathMatchers {
 		a := a.PathMatchers[i]
 		b := b.PathMatchers[i]
-		if utils.BackendServiceComparablePath(a.DefaultService) != utils.BackendServiceComparablePath(b.DefaultService) {
+		if !utils.EqualResourcePaths(a.DefaultService, b.DefaultService) {
 			return false
 		}
 		if a.Description != b.Description {
@@ -832,9 +827,7 @@ func mapsEqual(a, b *compute.UrlMap) bool {
 					return false
 				}
 			}
-			// Trim down the url's for a.Service and b.Service to a comparable structure
-			// We do this because we update the UrlMap with relative links (not full) to backends.
-			if utils.BackendServiceComparablePath(a.Service) != utils.BackendServiceComparablePath(b.Service) {
+			if !utils.EqualResourcePaths(a.Service, b.Service) {
 				return false
 			}
 		}
@@ -908,38 +901,44 @@ func (l *L7) Cleanup() error {
 }
 
 // getBackendNames returns the names of backends in this L7 urlmap.
-func (l *L7) getBackendNames() []string {
+func (l *L7) getBackendNames() ([]string, error) {
 	if l.um == nil {
-		return []string{}
+		return []string{}, nil
 	}
+
 	beNames := sets.NewString()
 	for _, pathMatcher := range l.um.PathMatchers {
 		for _, pathRule := range pathMatcher.PathRules {
-			// This is gross, but the urlmap only has links to backend services.
-			parts := strings.Split(pathRule.Service, "/")
-			name := parts[len(parts)-1]
-			if name != "" {
-				beNames.Insert(name)
+			name, err := utils.ResourceName(pathRule.Service)
+			if err != nil {
+				return nil, err
 			}
+			beNames.Insert(name)
 		}
 	}
 	// The default Service recorded in the urlMap is a link to the backend.
 	// Note that this can either be user specified, or the L7 controller's
 	// global default.
-	parts := strings.Split(l.um.DefaultService, "/")
-	defaultBackendName := parts[len(parts)-1]
-	if defaultBackendName != "" {
-		beNames.Insert(defaultBackendName)
+	name, err := utils.ResourceName(l.um.DefaultService)
+	if err != nil {
+		return nil, err
 	}
-	return beNames.List()
+	beNames.Insert(name)
+
+	return beNames.List(), nil
 }
 
 // GetLBAnnotations returns the annotations of an l7. This includes it's current status.
-func GetLBAnnotations(l7 *L7, existing map[string]string, backendPool backends.BackendPool) map[string]string {
+func GetLBAnnotations(l7 *L7, existing map[string]string, backendPool backends.BackendPool) (map[string]string, error) {
 	if existing == nil {
 		existing = map[string]string{}
 	}
-	backends := l7.getBackendNames()
+
+	backends, err := l7.getBackendNames()
+	if err != nil {
+		return nil, err
+	}
+
 	backendState := map[string]string{}
 	for _, beName := range backends {
 		backendState[beName] = backendPool.Status(beName)
@@ -977,7 +976,7 @@ func GetLBAnnotations(l7 *L7, existing map[string]string, backendPool backends.B
 	}
 	// TODO: We really want to know *when* a backend flipped states.
 	existing[fmt.Sprintf("%v/backends", annotations.StatusPrefix)] = jsonBackendState
-	return existing
+	return existing, nil
 }
 
 // GCEResourceName retrieves the name of the gce resource created for this
@@ -999,4 +998,9 @@ func toCertNames(certs []*compute.SslCertificate) (names []string) {
 		names = append(names, v.Name)
 	}
 	return names
+}
+
+// backendServiceResourcePath returns the relative path of a global backend service resource.
+func backendServiceResourcePath(name string) string {
+	return cloud.NewBackendServicesResourceID("", name).ResourcePath()
 }

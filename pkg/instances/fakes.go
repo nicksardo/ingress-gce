@@ -18,10 +18,11 @@ package instances
 
 import (
 	"fmt"
-	"strings"
 
 	compute "google.golang.org/api/compute/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud/meta"
 
 	"k8s.io/ingress-gce/pkg/utils"
 )
@@ -81,7 +82,7 @@ func (f *FakeInstanceGroups) GetInstanceGroup(name, zone string) (*compute.Insta
 
 // CreateInstanceGroup fakes instance group creation.
 func (f *FakeInstanceGroups) CreateInstanceGroup(ig *compute.InstanceGroup, zone string) error {
-	ig.SelfLink = fmt.Sprintf("/zones/%s/instanceGroups/%s", zone, ig.Name)
+	ig.SelfLink = cloud.NewInstanceGroupsResourceID("mock-project", zone, ig.Name).SelfLink(meta.VersionGA)
 	ig.Zone = zone
 	f.instanceGroups = append(f.instanceGroups, ig)
 	return nil
@@ -112,7 +113,11 @@ func (f *FakeInstanceGroups) ListInstancesInInstanceGroup(name, zone string, sta
 
 // AddInstancesToInstanceGroup fakes adding instances to an instance group.
 func (f *FakeInstanceGroups) AddInstancesToInstanceGroup(name, zone string, instanceRefs []*compute.InstanceReference) error {
-	instanceNames := toInstanceNames(instanceRefs)
+	instanceNames, err := instanceNamesFromRefs(instanceRefs)
+	if err != nil {
+		return err
+	}
+
 	f.calls = append(f.calls, utils.AddInstances)
 	f.instances.Insert(instanceNames...)
 	if _, ok := f.zonesToInstances[zone]; !ok {
@@ -129,7 +134,11 @@ func (f *FakeInstanceGroups) GetInstancesByZone() map[string][]string {
 
 // RemoveInstancesFromInstanceGroup fakes removing instances from an instance group.
 func (f *FakeInstanceGroups) RemoveInstancesFromInstanceGroup(name, zone string, instanceRefs []*compute.InstanceReference) error {
-	instanceNames := toInstanceNames(instanceRefs)
+	instanceNames, err := instanceNamesFromRefs(instanceRefs)
+	if err != nil {
+		return err
+	}
+
 	f.calls = append(f.calls, utils.RemoveInstances)
 	f.instances.Delete(instanceNames...)
 	l, ok := f.zonesToInstances[zone]
@@ -170,10 +179,10 @@ func getInstanceList(nodeNames sets.String) *compute.InstanceGroupsListInstances
 	instanceNames := nodeNames.List()
 	computeInstances := []*compute.InstanceWithNamedPorts{}
 	for _, name := range instanceNames {
-		instanceLink := getInstanceUrl(name)
 		computeInstances = append(
 			computeInstances, &compute.InstanceWithNamedPorts{
-				Instance: instanceLink})
+				Instance: cloud.NewInstancesResourceID("mock-project", "us-central1-c", name).SelfLink(meta.VersionGA),
+			})
 	}
 	return &compute.InstanceGroupsListInstances{
 		Items: computeInstances,
@@ -181,24 +190,10 @@ func getInstanceList(nodeNames sets.String) *compute.InstanceGroupsListInstances
 }
 
 func (f *FakeInstanceGroups) ToInstanceReferences(zone string, instanceNames []string) (refs []*compute.InstanceReference) {
-	for _, ins := range instanceNames {
-		instanceLink := getInstanceUrl(ins)
-		refs = append(refs, &compute.InstanceReference{Instance: instanceLink})
+	for _, name := range instanceNames {
+		refs = append(refs, &compute.InstanceReference{
+			Instance: cloud.NewInstancesResourceID("mock-project", zone, name).SelfLink(meta.VersionGA),
+		})
 	}
 	return refs
-}
-
-func getInstanceUrl(instanceName string) string {
-	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s",
-		"project", "zone", instanceName)
-}
-
-func toInstanceNames(instanceRefs []*compute.InstanceReference) []string {
-	instanceNames := make([]string, len(instanceRefs))
-	for ix := range instanceRefs {
-		url := instanceRefs[ix].Instance
-		parts := strings.Split(url, "/")
-		instanceNames[ix] = parts[len(parts)-1]
-	}
-	return instanceNames
 }

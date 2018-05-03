@@ -25,6 +25,8 @@ import (
 	compute "google.golang.org/api/compute/v1"
 	api_v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud/meta"
 
 	"k8s.io/ingress-gce/pkg/annotations"
 	"k8s.io/ingress-gce/pkg/utils"
@@ -95,9 +97,7 @@ func (f *FakeBackendServices) CreateAlphaGlobalBackendService(be *computealpha.B
 	}
 
 	f.calls = append(f.calls, utils.Create)
-	// This is a temporary hack to make a test work. Ideally in all of
-	// our fakes, we should be setting the self link to an actual path.
-	be.SelfLink = utils.BackendServiceRelativeResourcePath(be.Name)
+	be.SelfLink = cloud.NewBackendServicesResourceID("mock-project", be.Name).SelfLink(meta.VersionGA)
 	return f.backendServices.Update(be)
 }
 
