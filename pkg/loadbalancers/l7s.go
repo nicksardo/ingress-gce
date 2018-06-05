@@ -18,7 +18,6 @@ package loadbalancers
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/golang/glog"
 
@@ -35,16 +34,15 @@ type L7s struct {
 	namer       *utils.Namer
 }
 
-// Namer returns the namer associated with the L7s.
-func (l *L7s) Namer() *utils.Namer {
-	return l.namer
-}
-
 // NewLoadBalancerPool returns a new loadbalancer pool.
 // - cloud: implements LoadBalancers. Used to sync L7 loadbalancer resources
 //	 with the cloud.
 func NewLoadBalancerPool(cloud LoadBalancers, namer *utils.Namer) LoadBalancerPool {
-	return &L7s{cloud, storage.NewInMemoryPool(), namer}
+	return &L7s{
+		cloud:       cloud,
+		snapshotter: storage.NewInMemoryPool(),
+		namer:       namer,
+	}
 }
 
 // Get returns the loadbalancer by name.
@@ -57,38 +55,28 @@ func (l *L7s) Get(name string) (*L7, error) {
 	return lb.(*L7), nil
 }
 
-// addLB gets or creates a loadbalancer. If the loadbalancer already exists,
-// it checks that its edges are valid.
-func (l *L7s) addLB(ri *L7RuntimeInfo) (err error) {
+// Sync ensures a loadbalancer configuration.
+func (l *L7s) Sync(ri *L7RuntimeInfo) (err error) {
+	glog.V(3).Infof("Syncing load balancer %+v", ri)
 	name := l.namer.LoadBalancer(ri.Name)
 
-	lb, _ := l.Get(name)
-	if lb == nil {
-		glog.V(3).Infof("Creating l7 %v", name)
-		lb = &L7{
-			runtimeInfo: ri,
-			Name:        l.namer.LoadBalancer(ri.Name),
-			cloud:       l.cloud,
-			namer:       l.namer,
-		}
-		if err != nil {
-			return err
-		}
-	} else {
-		if !reflect.DeepEqual(lb.runtimeInfo, ri) {
-			glog.V(3).Infof("LB %v runtime info changed, old %+v new %+v", lb.Name, lb.runtimeInfo, ri)
-			lb.runtimeInfo = ri
-		}
+	lb = &L7{
+		runtimeInfo: ri,
+		Name:        l.namer.LoadBalancer(ri.Name),
+		cloud:       l.cloud,
+		namer:       l.namer,
 	}
+
 	// Add the lb to the pool, in case we create an UrlMap but run out
 	// of quota in creating the ForwardingRule we still need to cleanup
 	// the UrlMap during GC.
 	defer l.snapshotter.Add(name, lb)
 
-	// Why edge hop for the create?
-	// The loadbalancer is a fictitious resource, it doesn't exist in gce. To
-	// make it exist we need to create a collection of gce resources, done
-	// through the edge hop.
+	// Ensure the URLMap exists and is up-to-date.
+	if err := l.ensureComputeUrlMap(); err != nil {
+		return err
+	}
+
 	if err := lb.edgeHop(); err != nil {
 		return err
 	}
@@ -108,16 +96,6 @@ func (l *L7s) Delete(name string) error {
 		return err
 	}
 	l.snapshotter.Delete(name)
-	return nil
-}
-
-// Sync a load balancer with the given runtime info from the controller.
-func (l *L7s) Sync(ri *L7RuntimeInfo) error {
-	glog.V(3).Infof("Syncing load balancer %v", ri)
-	// Create new load balancer and validate existing
-	if err := l.addLB(ri); err != nil {
-		return err
-	}
 	return nil
 }
 

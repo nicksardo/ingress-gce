@@ -381,6 +381,7 @@ func (lbc *LoadBalancerController) ensureIngress(ing *extensions.Ingress, nodeNa
 		}
 	}
 
+	l7.Sync
 	// Update the UrlMap of the single loadbalancer that came through the watch.
 	l7, err := lbc.CloudClusterManager.l7Pool.Get(lb.Name)
 	if err != nil {

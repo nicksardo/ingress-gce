@@ -214,6 +214,22 @@ func EqualResourcePaths(a, b string) bool {
 	return aPath == bPath
 }
 
+// EqualResourceNames returns true if a and b have equal ResourceNames. Resource paths
+// entail the location, resource type, and resource name.
+func EqualResourceNames(a, b string) bool {
+	aName, err := ResourceName(a)
+	if err != nil {
+		return false
+	}
+
+	bName, err := ResourceName(b)
+	if err != nil {
+		return false
+	}
+
+	return aName == bName
+}
+
 // IGLinks returns a list of links extracted from the passed in list of
 // compute.InstanceGroup's.
 func IGLinks(igs []*compute.InstanceGroup) (igLinks []string) {

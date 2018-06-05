@@ -353,7 +353,53 @@ func (f *FakeLoadBalancers) SetSslCertificateForTargetHttpsProxy(proxy *compute.
 	return nil
 }
 
+// UrlMap fakes
+
+// CheckURLMap checks the compute.UrlMap maintained by the load balancer.
+// We check against our internal representation.
 func (f *FakeLoadBalancers) CheckURLMap(l7 *L7, expectedUrlMap *utils.GCEURLMap) error {
+	f.calls = append(f.calls, "CheckURLMap")
+	um, err := f.GetUrlMap(l7.UrlMap().Name)
+	if err != nil || um == nil {
+		return fmt.Errorf("f.GetUrlMap(%q) = %v, %v; want _, nil", l7.UrlMap().Name, um, err)
+	}
+	defaultBackendName := expectedUrlMap.DefaultBackend.BackendName(f.namer)
+	defaultBackendLink := utils.BackendServiceRelativeResourcePath(defaultBackendName)
+	// The urlmap should have a default backend, and each path matcher.
+	if defaultBackendName != "" && l7.UrlMap().DefaultService != defaultBackendLink {
+		return fmt.Errorf("default backend = %v, want %v", l7.UrlMap().DefaultService, defaultBackendLink)
+	}
+
+	for _, matcher := range l7.UrlMap().PathMatchers {
+		var hostname string
+		// There's a 1:1 mapping between pathmatchers and hosts
+		for _, hostRule := range l7.UrlMap().HostRules {
+			if matcher.Name == hostRule.PathMatcher {
+				if len(hostRule.Hosts) != 1 {
+					return fmt.Errorf("unexpected hosts in hostrules %+v", hostRule)
+				}
+				if defaultBackendLink != "" && matcher.DefaultService != defaultBackendLink {
+					return fmt.Errorf("expected default backend %v found %v", defaultBackendLink, matcher.DefaultService)
+				}
+				hostname = hostRule.Hosts[0]
+				break
+			}
+		}
+		// These are all pathrules for a single host, found above
+		for _, rule := range matcher.PathRules {
+			if len(rule.Paths) != 1 {
+				return fmt.Errorf("Unexpected rule in pathrules %+v", rule)
+			}
+			pathRule := rule.Paths[0]
+			if !expectedUrlMap.HostExists(hostname) {
+				return fmt.Errorf("Expected path rules for host %v", hostname)
+			} else if ok, svc := expectedUrlMap.PathExists(hostname, pathRule); !ok {
+				return fmt.Errorf("Expected rule %v for host %v", pathRule, hostname)
+			} else if utils.BackendServiceRelativeResourcePath(svc.BackendName(f.namer)) != rule.Service {
+				return fmt.Errorf("Expected service %v found %v", svc, rule.Service)
+			}
+		}
+	}
 	return nil
 }
 
